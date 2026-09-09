@@ -1,0 +1,29 @@
+# Python
+__pycache__/
+*.py[cod]
+.venv/
+venv/
+
+# Environment / credentials
+.env
+.env.*
+*.pem
+*.key
+
+# AWS local configuration if copied into repo
+.aws/
+
+# Data
+data/raw/
+data/*.csv
+*.csv
+*.drawio
+
+# Notebook checkpoints
+.ipynb_checkpoints/
+
+# OS / editor
+.DS_Store
+Thumbs.db
+.vscode/
+
