@@ -71,7 +71,7 @@ Se realizó un diagrama entidad-relación para identificar llaves lógicas, card
 ## 4. Arquitectura de la solución
 
 
-![Arquitectura AWS](docs\screenshots\aws_olist_architecture_editable.svg)
+![Arquitectura AWS](docs/screenshots/aws_olist_architecture_editable.svg)
 
 El pipeline implementado sigue el flujo:
 
