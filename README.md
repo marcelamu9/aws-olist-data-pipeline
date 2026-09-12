@@ -337,6 +337,22 @@ aws-olist-data-pipeline/
 ```
 
 ---
+## 14.   Dashboard con Amazon QuickSight
+Se construyó un dashboard analítico conectado a `olist_analytics_db` mediante Amazon Athena y SPICE.
+
+El tablero permite explorar:
+
+- tasa de retraso general;
+- tiempo promedio de entrega;
+- satisfacción promedio;
+- retrasos por estado;
+- retrasos por categoría;
+- patrones mensuales;
+- patrones por día de la semana.
+
+![QuickSight Dashboard](docs/screenshots/quicksight_dashboard.png)
+
+---
 
 ## 13. Machine Learning  próxima versión
 
