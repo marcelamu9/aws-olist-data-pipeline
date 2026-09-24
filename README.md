@@ -356,17 +356,112 @@ El tablero permite explorar:
 
 ## 13. Machine Learning  próxima versión
 
-Una evolución natural del proyecto consiste en entrenar un modelo de clasificación que estime:
-```P(is_delayed = 1)```
+## 13. Machine Learning con Amazon SageMaker
 
-La implementación prevista utilizará Amazon SageMaker y XGBoost. Las features deberán limitarse a información conocida antes de la entrega para evitar data leakage.
+Se implementó un modelo de clasificación con **XGBoost** para estimar la probabilidad de que un pedido llegue después de su fecha estimada de entrega:
+
+`P(is_delayed = 1)`
+
+El objetivo es identificar anticipadamente pedidos con mayor riesgo de retraso, utilizando únicamente información disponible antes de conocer el resultado de la entrega y evitando *data leakage*.
+
+### 13.1. Preparación de datos
+
+Se utilizó la tabla analítica `orders_analytics`, generada por el proceso ETL de AWS Glue y almacenada en Amazon S3 en formato Parquet.
+
+Se seleccionaron **96.476 pedidos con resultado de entrega conocido** y se dividieron en tres conjuntos mediante muestreo estratificado:
+
+| Conjunto      | Registros | Proporción |
+| ------------- | --------: | ---------: |
+| Entrenamiento |    67.533 |        70% |
+| Validación    |    14.471 |        15% |
+| Test          |    14.472 |        15% |
+
+La clase de pedidos retrasados representa aproximadamente el **8,11%** de los datos.
+
+El preprocesamiento incluye agrupación de categorías de producto poco frecuentes, imputación de valores faltantes y One-Hot Encoding de variables categóricas. El conjunto de entrenamiento se utiliza para ajustar las transformaciones, que posteriormente se aplican a validación y test.
+
+Las variables incluyen ubicación del cliente, categoría del producto, características del pedido, costo de envío, dimensiones y peso del producto, plazo estimado de entrega y características temporales de la compra.
+
+Se excluyeron variables conocidas después de la entrega, como el tiempo real de entrega, los días de retraso y las calificaciones de los clientes.
+
+### 13.2. Experimentación y evaluación local
+
+Se desarrolló un modelo XGBoost en SageMaker JupyterLab y se evaluó mediante ROC-AUC, PR-AUC, precision, recall y F1-score, considerando el desbalance de clases.
+
+El umbral de clasificación se seleccionó utilizando el conjunto de validación y se fijó en `0.65` antes de la evaluación final sobre test.
+
+El análisis de importancia de variables identificó el mes de compra, el estado del cliente y la categoría principal del producto como las variables con mayor importancia agregada en el modelo. Estas importancias no representan relaciones causales.
+
+### 13.3. Entrenamiento administrado
+
+Los conjuntos preprocesados se exportaron a CSV numérico y se almacenaron en Amazon S3. Se utilizó un **Amazon SageMaker Training Job** con el contenedor administrado de XGBoost y una instancia `ml.m5.large`.
+
+El entrenamiento finalizó correctamente y produjo las siguientes métricas:
+
+| Métrica            | Resultado |
+| ------------------ | --------: |
+| Train ROC-AUC      |    0.8453 |
+| Validation ROC-AUC |    0.7722 |
+
+El modelo entrenado se almacenó automáticamente en Amazon S3 como `model.tar.gz`, sin necesidad de mantener un endpoint activo.
+
+### 13.4. Inferencia con SageMaker Batch Transform
+
+Se creó un modelo de SageMaker a partir del artefacto generado por el Training Job y se ejecutó un **Batch Transform Job** sobre el conjunto de test, utilizando una instancia `ml.m5.large`.
+
+Las predicciones se almacenaron en Amazon S3 y se evaluaron utilizando las etiquetas reales de test y el umbral previamente establecido de `0.65`.
+
+Los resultados fueron:
+
+| Métrica   | XGBoost local | SageMaker XGBoost |
+| --------- | ------------: | ----------------: |
+| ROC-AUC   |        0.7812 |            0.7798 |
+| PR-AUC    |        0.2597 |            0.2588 |
+| Precision |        0.2628 |            0.2597 |
+| Recall    |        0.4557 |            0.4446 |
+| F1-score  |        0.3333 |            0.3279 |
+
+El desempeño del modelo administrado fue similar al obtenido durante la experimentación local. Con el umbral seleccionado, el modelo de SageMaker identificó aproximadamente el **44,5% de los pedidos retrasados**, con una precisión del **26,0%**.
+
+### 13.5. Arquitectura de Machine Learning
+
+```text
+Amazon S3 — Processed Parquet
+             |
+             v
+    SageMaker JupyterLab
+    EDA y preprocesamiento
+             |
+             v
+    Amazon S3 — ML datasets
+       train / validation
+             |
+             v
+  SageMaker Training Job
+       Managed XGBoost
+             |
+             v
+ Amazon S3 — model.tar.gz
+             |
+             v
+ SageMaker Batch Transform
+             |
+             v
+ Amazon S3 — Predicciones
+             |
+             v
+ Evaluación sobre test
+```
+
+El notebook de experimentación y ejecución se encuentra en [`sagemaker/delay_prediction.ipynb`](sagemaker/delay_prediction.ipynb).
+
+La implementación utiliza entrenamiento e inferencia administrados bajo demanda, sin desplegar un endpoint persistente.
+
 
 ---
 
 ## 14. Próximas mejoras
 
-- Crear un dashboard analítico con Amazon QuickSight.
-- Entrenar el modelo de riesgo de retraso con Amazon SageMaker.
 - Automatizar la ejecución mediante AWS Step Functions o Glue Workflows.
 - Definir la infraestructura mediante Terraform.
 - Analizar las reseñas textuales utilizando NLP o Amazon Bedrock.
@@ -381,9 +476,11 @@ La implementación prevista utilizará Amazon SageMaker y XGBoost. Las features 
 - AWS Glue
 - AWS Glue Data Catalog
 - Amazon Athena
+- Amazon SageMaker
 - Amazon CloudWatch
 - AWS IAM
 - Python
+- JupyterLab
 - PySpark
 - SQL
 - Parquet
