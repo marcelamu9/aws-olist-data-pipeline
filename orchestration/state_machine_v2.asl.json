@@ -1,0 +1,206 @@
+{
+  "Comment": "Olist analytics pipeline orchestration",
+  "StartAt": "RunGlueETL",
+  "States": {
+    "RunGlueETL": {
+      "Type": "Task",
+      "Resource": "arn:aws:states:::glue:startJobRun.sync",
+      "Parameters": {
+        "JobName": "olist-transform-orders"
+      },
+      "ResultPath": "$.etl",
+      "Catch": [
+        {
+          "ErrorEquals": [
+            "States.ALL"
+          ],
+          "ResultPath": "$.error",
+          "Next": "PipelineFailed"
+        }
+      ],
+      "Next": "StartAnalyticsCrawler"
+    },
+    "StartAnalyticsCrawler": {
+      "Type": "Task",
+      "Resource": "arn:aws:states:::aws-sdk:glue:startCrawler",
+      "Parameters": {
+        "Name": "olist_analytics_crawler"
+      },
+      "ResultPath": "$.crawler_start",
+      "Catch": [
+        {
+          "ErrorEquals": [
+            "States.ALL"
+          ],
+          "ResultPath": "$.error",
+          "Next": "PipelineFailed"
+        }
+      ],
+      "Next": "InitializePolling"
+    },
+    "InitializePolling": {
+      "Type": "Pass",
+      "Parameters": {
+        "attempts": 0,
+        "execution_start.$": "$$.Execution.StartTime"
+      },
+      "ResultPath": "$.poll",
+      "Next": "WaitForCrawler"
+    },
+    "WaitForCrawler": {
+      "Type": "Wait",
+      "Seconds": 30,
+      "Next": "CheckCrawler"
+    },
+    "CheckCrawler": {
+      "Type": "Task",
+      "Resource": "arn:aws:states:::aws-sdk:glue:getCrawler",
+      "Parameters": {
+        "Name": "olist_analytics_crawler"
+      },
+      "ResultPath": "$.crawler_result",
+      "Catch": [
+        {
+          "ErrorEquals": [
+            "States.ALL"
+          ],
+          "ResultPath": "$.error",
+          "Next": "PipelineFailed"
+        }
+      ],
+      "Next": "CrawlerStatus"
+    },
+    "CrawlerStatus": {
+      "Type": "Choice",
+      "Choices": [
+        {
+          "And": [
+            {
+              "Variable": "$.crawler_result.Crawler.State",
+              "StringEquals": "READY"
+            },
+            {
+              "Variable": "$.crawler_result.Crawler.LastCrawl.Status",
+              "StringEquals": "SUCCEEDED"
+            },
+            {
+              "Variable": "$.crawler_result.Crawler.LastCrawl.StartTime",
+              "TimestampGreaterThanEqualsPath": "$.poll.execution_start"
+            },
+            {
+              "Variable": "$.crawler_result.Crawler.LastCrawl.Status",
+              "StringEquals": "SUCCEEDED"
+            }
+          ],
+          "Next": "RunQualityQuery"
+        },
+        {
+          "And": [
+            {
+              "Variable": "$.crawler_result.Crawler.State",
+              "StringEquals": "READY"
+            },
+            {
+              "Variable": "$.crawler_result.Crawler.LastCrawl.StartTime",
+              "IsPresent": true
+            },
+            {
+              "Variable": "$.crawler_result.Crawler.LastCrawl.StartTime",
+              "TimestampGreaterThanEqualsPath": "$.poll.execution_start"
+            },
+            {
+              "Or": [
+                {
+                  "Variable": "$.crawler_result.Crawler.LastCrawl.Status",
+                  "StringEquals": "FAILED"
+                },
+                {
+                  "Variable": "$.crawler_result.Crawler.LastCrawl.Status",
+                  "StringEquals": "CANCELLED"
+                }
+              ]
+            }
+          ],
+          "Next": "PipelineFailed"
+        }
+      ],
+      "Default": "IncrementPolling"
+    },
+    "IncrementPolling": {
+      "Type": "Pass",
+      "Parameters": {
+        "attempts.$": "States.MathAdd($.poll.attempts, 1)",
+        "execution_start.$": "$.poll.execution_start"
+      },
+      "ResultPath": "$.poll",
+      "Next": "CheckPollingLimit"
+    },
+    "CheckPollingLimit": {
+      "Type": "Choice",
+      "Choices": [
+        {
+          "Variable": "$.poll.attempts",
+          "NumericGreaterThanEquals": 20,
+          "Next": "PollingTimedOut"
+        }
+      ],
+      "Default": "WaitForCrawler"
+    },
+    "PollingTimedOut": {
+      "Type": "Fail",
+      "Error": "CrawlerPollingTimeout",
+      "Cause": "The crawler exceeded the maximum number of status checks."
+    },
+    "PipelineSucceeded": {
+      "Type": "Succeed"
+    },
+    "PipelineFailed": {
+      "Type": "Fail",
+      "Error": "OlistPipelineFailed",
+      "Cause": "Glue ETL or analytics crawler did not complete successfully."
+    },
+    "RunQualityQuery": {
+      "Type": "Task",
+      "Resource": "arn:aws:states:::athena:startQueryExecution.sync",
+      "Parameters": {
+        "QueryString": "WITH metrics AS (SELECT COUNT(*) AS total_orders, COUNT(DISTINCT order_id) AS unique_orders, COUNT_IF(order_id IS NULL) AS null_ids, COUNT_IF(is_delayed IS NOT NULL AND is_delayed NOT IN (0, 1)) AS invalid_labels FROM olist_analytics_db.orders_analytics) SELECT CASE WHEN total_orders > 0 AND total_orders = unique_orders AND null_ids = 0 AND invalid_labels = 0 THEN 'PASS' ELSE 'FAIL' END AS quality_status FROM metrics",
+        "WorkGroup": "primary",
+        "ResultConfiguration": {
+          "OutputLocation": "s3://aws-olist-data-pipeline/athena-results/"
+        }
+      },
+      "ResultPath": "$.query",
+      "Next": "GetQualityResults"
+    },
+    "GetQualityResults": {
+      "Type": "Task",
+      "Resource": "arn:aws:states:::athena:getQueryResults",
+      "Parameters": {
+        "QueryExecutionId.$": "$.query.QueryExecution.QueryExecutionId",
+        "MaxResults": 2
+      },
+      "ResultPath": "$.quality",
+      "Next": "EvaluateQuality"
+    },
+    "EvaluateQuality": {
+      "Type": "Choice",
+      "Choices": [
+        {
+          "Variable": "$.quality.ResultSet.Rows[1].Data[0].VarCharValue",
+          "StringEquals": "PASS",
+          "Next": "QualityPassed"
+        }
+      ],
+      "Default": "QualityFailed"
+    },
+    "QualityPassed": {
+      "Type": "Pass",
+      "Next": "PipelineSucceeded"
+    },
+    "QualityFailed": {
+      "Type": "Fail",
+      "Error": "DataQualityFailed",
+      "Cause": "The analytics dataset did not pass validation."
+    }
+  }
+}

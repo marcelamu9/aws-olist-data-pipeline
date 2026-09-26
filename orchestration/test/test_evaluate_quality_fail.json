@@ -1,0 +1,18 @@
+{
+  "quality": {
+    "ResultSet": {
+      "Rows": [
+        {
+          "Data": [
+            {"VarCharValue": "quality_status"}
+          ]
+        },
+        {
+          "Data": [
+            {"VarCharValue": "  FAIL"}
+          ]
+        }
+      ]
+    }
+  }
+}

@@ -1,0 +1,49 @@
+
+{
+  "Comment": "Olist data quality validation using Athena",
+  "StartAt": "RunQualityQuery",
+  "States": {
+    "RunQualityQuery": {
+      "Type": "Task",
+      "Resource": "arn:aws:states:::athena:startQueryExecution.sync",
+      "Parameters": {
+        "QueryString": "WITH metrics AS (SELECT COUNT(*) AS total_orders, COUNT(DISTINCT order_id) AS unique_orders, COUNT_IF(order_id IS NULL) AS null_ids, COUNT_IF(is_delayed IS NOT NULL AND is_delayed NOT IN (0, 1)) AS invalid_labels FROM olist_analytics_db.orders_analytics) SELECT CASE WHEN total_orders > 0 AND total_orders = unique_orders AND null_ids = 0 AND invalid_labels = 0 THEN 'PASS' ELSE 'FAIL' END AS quality_status FROM metrics",
+        "WorkGroup": "primary",
+        "ResultConfiguration": {
+          "OutputLocation": "s3://aws-olist-data-pipeline/athena-results/"
+        }
+      },
+      "ResultPath": "$.query",
+      "Next": "GetQualityResults"
+    },
+    "GetQualityResults": {
+      "Type": "Task",
+      "Resource": "arn:aws:states:::athena:getQueryResults",
+      "Parameters": {
+        "QueryExecutionId.$": "$.query.QueryExecution.QueryExecutionId",
+        "MaxResults": 2
+      },
+      "ResultPath": "$.quality",
+      "Next": "EvaluateQuality"
+    },
+    "EvaluateQuality": {
+      "Type": "Choice",
+      "Choices": [
+        {
+          "Variable": "$.quality.ResultSet.Rows[1].Data[0].VarCharValue",
+          "StringEquals": "PASS",
+          "Next": "QualityPassed"
+        }
+      ],
+      "Default": "QualityFailed"
+    },
+    "QualityPassed": {
+      "Type": "Succeed"
+    },
+    "QualityFailed": {
+      "Type": "Fail",
+      "Error": "DataQualityFailed",
+      "Cause": "The analytics dataset did not pass validation."
+    }
+  }
+}

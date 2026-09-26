@@ -1,0 +1,63 @@
+{
+    "Version":  "2012-10-17",
+    "Statement":  [
+                      {
+                          "Sid":  "RunAthenaQualityQueries",
+                          "Effect":  "Allow",
+                          "Action":  [
+                                         "athena:StartQueryExecution",
+                                         "athena:GetQueryExecution",
+                                         "athena:BatchGetQueryExecution",
+                                         "athena:GetQueryResults",
+                                         "athena:StopQueryExecution",
+                                         "athena:GetWorkGroup",
+                                         "athena:GetDataCatalog"
+                                     ],
+                          "Resource":  [
+                                           "arn:aws:athena:us-east-1:214654654308:workgroup/primary",
+                                           "arn:aws:athena:us-east-1:214654654308:datacatalog/AwsDataCatalog"
+                                       ]
+                      },
+                      {
+                          "Sid":  "ReadAnalyticsCatalog",
+                          "Effect":  "Allow",
+                          "Action":  [
+                                         "glue:GetDatabase",
+                                         "glue:GetTable",
+                                         "glue:GetPartitions"
+                                     ],
+                          "Resource":  [
+                                           "arn:aws:glue:us-east-1:214654654308:catalog",
+                                           "arn:aws:glue:us-east-1:214654654308:database/olist_analytics_db",
+                                           "arn:aws:glue:us-east-1:214654654308:table/olist_analytics_db/orders_analytics"
+                                       ]
+                      },
+                      {
+                          "Sid":  "ListOlistBucket",
+                          "Effect":  "Allow",
+                          "Action":  [
+                                         "s3:GetBucketLocation",
+                                         "s3:ListBucket"
+                                     ],
+                          "Resource":  "arn:aws:s3:::aws-olist-data-pipeline"
+                      },
+                      {
+                          "Sid":  "ReadAnalyticsParquet",
+                          "Effect":  "Allow",
+                          "Action":  [
+                                         "s3:GetObject"
+                                     ],
+                          "Resource":  "arn:aws:s3:::aws-olist-data-pipeline/processed/orders_analytics/*"
+                      },
+                      {
+                          "Sid":  "ManageAthenaQueryResults",
+                          "Effect":  "Allow",
+                          "Action":  [
+                                         "s3:GetObject",
+                                         "s3:PutObject",
+                                         "s3:AbortMultipartUpload"
+                                     ],
+                          "Resource":  "arn:aws:s3:::aws-olist-data-pipeline/athena-results/*"
+                      }
+                  ]
+}
