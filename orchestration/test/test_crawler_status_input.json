@@ -1,0 +1,15 @@
+{
+  "poll": {
+    "attempts": 2,
+    "execution_start": "2026-09-25T22:00:00Z"
+  },
+  "crawler_result": {
+    "Crawler": {
+      "State": "RUNNING",
+      "LastCrawl": {
+        "StartTime": "2026-09-25T22:05:00Z",
+        "Status": "SUCCEEDED"
+      }
+    }
+  }
+}

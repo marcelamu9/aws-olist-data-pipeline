@@ -1,0 +1,158 @@
+
+{
+  "Comment": "Olist analytics pipeline orchestration",
+  "StartAt": "RunGlueETL",
+  "States": {
+    "RunGlueETL": {
+      "Type": "Task",
+      "Resource": "arn:aws:states:::glue:startJobRun.sync",
+      "Parameters": {
+        "JobName": "olist-transform-orders"
+      },
+      "ResultPath": "$.etl",
+      "Catch": [
+        {
+          "ErrorEquals": ["States.ALL"],
+          "ResultPath": "$.error",
+          "Next": "PipelineFailed"
+        }
+      ],
+      "Next": "StartAnalyticsCrawler"
+    },
+    "StartAnalyticsCrawler": {
+      "Type": "Task",
+      "Resource": "arn:aws:states:::aws-sdk:glue:startCrawler",
+      "Parameters": {
+        "Name": "olist_analytics_crawler"
+      },
+      "ResultPath": "$.crawler_start",
+      "Catch": [
+        {
+          "ErrorEquals": ["States.ALL"],
+          "ResultPath": "$.error",
+          "Next": "PipelineFailed"
+        }
+      ],
+      "Next": "InitializePolling"
+    },
+    "InitializePolling": {
+      "Type": "Pass",
+      "Parameters": {
+        "attempts": 0,
+        "execution_start.$": "$$.Execution.StartTime"
+      },
+      "ResultPath": "$.poll",
+      "Next": "WaitForCrawler"
+    },
+    "WaitForCrawler": {
+      "Type": "Wait",
+      "Seconds": 30,
+      "Next": "CheckCrawler"
+    },
+    "CheckCrawler": {
+      "Type": "Task",
+      "Resource": "arn:aws:states:::aws-sdk:glue:getCrawler",
+      "Parameters": {
+        "Name": "olist_analytics_crawler"
+      },
+      "ResultPath": "$.crawler_result",
+      "Catch": [
+        {
+          "ErrorEquals": ["States.ALL"],
+          "ResultPath": "$.error",
+          "Next": "PipelineFailed"
+        }
+      ],
+      "Next": "CrawlerStatus"
+    },
+    "CrawlerStatus": {
+      "Type": "Choice",
+      "Choices": [
+        {
+          "And": [
+            {
+              "Variable": "$.crawler_result.Crawler.State",
+              "StringEquals": "READY"
+            },
+            {
+              "Variable": "$.crawler_result.Crawler.LastCrawl.Status",
+              "StringEquals": "SUCCEEDED"
+            },
+            {
+              "Variable": "$.crawler_result.Crawler.LastCrawl.StartTime",
+              "TimestampGreaterThanEqualsPath": "$.poll.execution_start"
+            },
+             {
+              "Variable": "$.crawler_result.Crawler.LastCrawl.Status",
+              "StringEquals": "SUCCEEDED"
+            } 
+          ],
+          "Next": "PipelineSucceeded"
+        },
+        {
+          "And": [
+            {
+              "Variable": "$.crawler_result.Crawler.State",
+              "StringEquals": "READY"
+            },
+            {
+              "Variable": "$.crawler_result.Crawler.LastCrawl.StartTime",
+              "IsPresent": true
+            },
+            {
+              "Variable": "$.crawler_result.Crawler.LastCrawl.StartTime",
+              "TimestampGreaterThanEqualsPath": "$.poll.execution_start"
+            },
+            {
+              "Or": [
+                {
+                  "Variable": "$.crawler_result.Crawler.LastCrawl.Status",
+                  "StringEquals": "FAILED"
+                },
+                {
+                  "Variable": "$.crawler_result.Crawler.LastCrawl.Status",
+                  "StringEquals": "CANCELLED"
+                }
+              ]
+            }
+          ],
+          "Next": "PipelineFailed"
+        }
+      ],
+      "Default": "IncrementPolling"
+    },
+    "IncrementPolling": {
+      "Type": "Pass",
+      "Parameters": {
+        "attempts.$": "States.MathAdd($.poll.attempts, 1)",
+        "execution_start.$": "$.poll.execution_start"
+      },
+      "ResultPath": "$.poll",
+      "Next": "CheckPollingLimit"
+    },
+    "CheckPollingLimit": {
+      "Type": "Choice",
+      "Choices": [
+        {
+          "Variable": "$.poll.attempts",
+          "NumericGreaterThanEquals": 20,
+          "Next": "PollingTimedOut"
+        }
+      ],
+      "Default": "WaitForCrawler"
+    },
+    "PollingTimedOut": {
+      "Type": "Fail",
+      "Error": "CrawlerPollingTimeout",
+      "Cause": "The crawler exceeded the maximum number of status checks."
+    },
+    "PipelineSucceeded": {
+      "Type": "Succeed"
+    },
+    "PipelineFailed": {
+      "Type": "Fail",
+      "Error": "OlistPipelineFailed",
+      "Cause": "Glue ETL or analytics crawler did not complete successfully."
+    }
+  }
+}
