@@ -460,6 +460,31 @@ La implementación utiliza entrenamiento e inferencia administrados bajo demanda
 
 ---
 
+## 14. Orquestación con AWS Step Functions
+
+Se implementó una máquina de estados de tipo **Standard** para coordinar la ejecución del pipeline analítico de Olist mediante AWS Step Functions.
+
+El flujo automatiza las siguientes operaciones:
+
+1. Ejecutar el Glue Job `olist-transform-orders` y esperar su finalización.
+2. Iniciar el crawler `olist_analytics_crawler` para actualizar el catálogo analítico.
+3. Consultar periódicamente el estado del crawler, con intervalos de 30 segundos y un máximo de 20 comprobaciones.
+4. Finalizar correctamente cuando el ETL y el crawler hayan terminado con éxito, o registrar un fallo cuando alguno de los procesos falle o se agote el límite de espera.
+
+La máquina utiliza el rol IAM `OlistStepFunctionsExecutionRole`, con permisos específicos para ejecutar y consultar el Glue Job y el crawler.
+
+La definición se encuentra en [`orchestration/state_machine.asl.json`](orchestration/state_machine.asl.json), junto con la política IAM y los archivos utilizados para probar individualmente los estados.
+
+### Validación
+
+Se realizaron pruebas aisladas para comprobar el incremento del contador y las decisiones del crawler, seguidas de una ejecución completa de integración que finalizó en estado **Succeeded**.
+
+![Ejecución exitosa del pipeline en Step Functions](docs/screenshots/stepfunctions_graph.png)
+
+La orquestación se inicia actualmente de forma manual. Como siguientes mejoras se contempla incorporar un disparador automático y controles de calidad de datos antes de dar por completado el pipeline.
+
+
+---
 ## 14. Próximas mejoras
 
 - Automatizar la ejecución mediante AWS Step Functions o Glue Workflows.
